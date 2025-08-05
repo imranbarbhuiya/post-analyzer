@@ -14,7 +14,7 @@ export const config: PlasmoCSConfig = {
 };
 
 const LoadingSpinner = () => (
-	<div style={styles.spinner}>
+	<div style={styles.spinner} aria-hidden>
 		<div style={styles.spinnerInner}></div>
 	</div>
 );
@@ -24,33 +24,47 @@ const Modal = ({
 	onClose,
 	onSendAnyway,
 	loading,
+	reason,
 }: {
 	open: boolean;
 	onClose: () => void;
 	onSendAnyway: () => void;
 	loading?: boolean;
+	reason?: string;
 }) => {
+	const title = loading ? 'Checking your post…' : 'Review before posting';
+	const description = loading
+		? 'Analyzing your post with AI…'
+		: 'This post might not land well. Consider revising for clarity or tone before sending.';
+
 	if (!open) return null;
 	return (
-		<div style={styles.backdrop} onClick={loading ? undefined : onClose}>
+		<div
+			style={styles.backdrop}
+			onClick={loading ? undefined : onClose}
+			role="dialog"
+			aria-modal="true"
+			aria-label={title}
+		>
 			<div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-				<div style={styles.header}>{loading ? 'Checking post quality...' : 'Not now'}</div>
+				<div style={styles.header}>{title}</div>
 				<div style={styles.body}>
 					{loading ? (
 						<div style={styles.loadingContent}>
 							<LoadingSpinner />
-							<div>Analyzing your post with AI...</div>
+							<div>{description}</div>
 						</div>
 					) : (
-						"This post's quality seems poor. Rephrase it to a better version before sending."
+						description
 					)}
+					{!loading && reason && <div style={styles.errorText}>⚠︎ {reason}</div>}
 				</div>
 				{!loading && (
 					<div style={styles.footer}>
-						<button style={{ ...styles.button, ...styles.secondaryButton }} onClick={onClose}>
+						<button style={{ ...styles.button, ...styles.secondaryButton }} onClick={onClose} aria-label="Close dialog">
 							Close
 						</button>
-						<button style={styles.button} onClick={onSendAnyway}>
+						<button style={styles.button} onClick={onSendAnyway} aria-label="Send anyway">
 							Send anyway
 						</button>
 					</div>
@@ -72,48 +86,50 @@ const resultSchema = z.object({
 const App = () => {
 	const [open, setOpen] = useState(false);
 	const [loading, setLoading] = useState(false);
+	const [reason, setReason] = useState<string | null>(null);
 	const pendingBypass = useRef<(() => void) | null>(null);
-	const model = useCallback(async () => {
+
+	const openaiFactory = useCallback(async () => {
 		const apiKey = await storage.get('ps.apiKey');
-		if (!apiKey) {
-			throw new Error('API key is not set');
-		}
-		return createOpenAI({
-			apiKey,
-		});
+		if (!apiKey) throw new Error('API key is not set');
+		return createOpenAI({ apiKey });
 	}, []);
 
-	const evaluateSendability = async (text: string) => {
-		const sys = await storage.get('ps.systemPrompt');
+	const evaluateSendability = useCallback(
+		async (text: string) => {
+			const sys = await storage.get('ps.systemPrompt');
+			if (!sys) return { isSendable: true };
+			try {
+				const { object } = await generateObject({
+					model: (await openaiFactory())('gpt-4o-mini'),
+					system: sys,
+					schema: resultSchema,
+					prompt: `Evaluate if this message should be blocked. Respond with isSendable=false to block, true to allow. Draft:\n\n${text}`,
+				});
 
-		if (!sys) return { isSendable: true };
-		try {
-			const { object } = await generateObject({
-				model: (await model())('gpt-4o-mini'),
-				system: sys,
-				schema: resultSchema,
-				prompt: `Evaluate if this message should be blocked. Respond with isSendable=false to block, true to allow. Draft:\n\n${text}`,
-			});
-
-			return object as z.infer<typeof resultSchema>;
-		} catch (e) {
-			console.error('Error evaluating sendability:', e);
-			return { isSendable: false };
-		}
-	};
+				return object as z.infer<typeof resultSchema>;
+			} catch (e) {
+				console.error('Error evaluating sendability:', e);
+				return { isSendable: false, reason: 'Error during evaluation' };
+			}
+		},
+		[openaiFactory],
+	);
 
 	useEffect(() => {
+		let isDisposed = false;
+
 		const tryIntercept = async (submitAction: () => void) => {
+			if (isDisposed) return;
 			const composer = document.querySelector('[data-testid^="tweetTextarea_"]') as HTMLTextAreaElement | null;
 			const text = composer?.textContent || composer?.value || '';
-
 			setOpen(true);
 			setLoading(true);
-
 			try {
-				const { isSendable } = await evaluateSendability(text);
-
+				const { isSendable, reason } = await evaluateSendability(text);
+				if (isDisposed) return;
 				setLoading(false);
+				setReason(reason || null);
 
 				if (!isSendable) {
 					pendingBypass.current = submitAction;
@@ -122,6 +138,7 @@ const App = () => {
 					submitAction();
 				}
 			} catch (error) {
+				if (isDisposed) return;
 				setLoading(false);
 				setOpen(false);
 				console.error('Error during AI evaluation:', error);
@@ -132,12 +149,11 @@ const App = () => {
 		const clickHandler = (e: MouseEvent) => {
 			const target = e.target as HTMLElement | null;
 			if (!target) return;
-			const btn = target.closest('[data-testid="tweetButtonInline"]') as HTMLElement | null;
+			const btn = target.closest(
+				'[data-testid="tweetButtonInline"], [data-testid="tweetButton"]',
+			) as HTMLElement | null;
 			if (!btn) return;
-
 			if (e.isTrusted === false) return;
-
-			console.log(`Click detected on ${target.tagName}#${target.id}`);
 			e.preventDefault();
 			e.stopPropagation();
 			e.stopImmediatePropagation?.();
@@ -157,12 +173,11 @@ const App = () => {
 				e.preventDefault();
 				e.stopPropagation();
 				tryIntercept(() => {
-					const btn = document.querySelector('[data-testid="tweetButtonInline"]') as HTMLElement | null;
+					const btn = document.querySelector(
+						'[data-testid="tweetButtonInline"], [data-testid="tweetButton"]',
+					) as HTMLElement | null;
 					if (btn) {
-						const ev = new MouseEvent('click', {
-							bubbles: true,
-							cancelable: true,
-						});
+						const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
 						btn.dispatchEvent(ev);
 					}
 				});
@@ -172,37 +187,37 @@ const App = () => {
 		document.addEventListener('keydown', keyHandler, true);
 
 		const mo = new MutationObserver(() => {
-			document.querySelectorAll<HTMLElement>('[data-testid="tweetButtonInline"]').forEach((el) => {
-				el.removeAttribute('aria-disabled');
-				el.style.cursor = 'pointer';
-			});
+			document
+				.querySelectorAll<HTMLElement>('[data-testid="tweetButtonInline"], [data-testid="tweetButton"]')
+				.forEach((el) => {
+					el.removeAttribute('aria-disabled');
+					el.style.cursor = 'pointer';
+				});
 		});
 		mo.observe(document.documentElement, { childList: true, subtree: true });
 
 		return () => {
+			isDisposed = true;
 			document.removeEventListener('click', clickHandler, true);
 			document.removeEventListener('keydown', keyHandler, true);
 			mo.disconnect();
 		};
+	}, [evaluateSendability]);
+
+	const handleClose = useCallback(() => {
+		setOpen(false);
+		setLoading(false);
 	}, []);
 
-	return (
-		<Modal
-			open={open}
-			loading={loading}
-			onClose={() => {
-				setOpen(false);
-				setLoading(false);
-			}}
-			onSendAnyway={() => {
-				const fn = pendingBypass.current;
-				pendingBypass.current = null;
-				setOpen(false);
-				setLoading(false);
-				fn?.();
-			}}
-		/>
-	);
+	const handleSendAnyway = useCallback(() => {
+		const fn = pendingBypass.current;
+		pendingBypass.current = null;
+		setOpen(false);
+		setLoading(false);
+		fn?.();
+	}, []);
+
+	return <Modal open={open} loading={loading} onClose={handleClose} onSendAnyway={handleSendAnyway} reason={reason} />;
 };
 
 const containerId = 'post-analyzer-x-modal-root';
@@ -210,30 +225,21 @@ let root: ReturnType<typeof createRoot> | null = null;
 
 function ensureContainer() {
 	if (document.getElementById(containerId)) return;
-
 	if (!document.getElementById('post-analyzer-spinner-styles')) {
 		const style = document.createElement('style');
 		style.id = 'post-analyzer-spinner-styles';
 		style.textContent = `
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     `;
 		document.head.appendChild(style);
 	}
-
 	const host = document.createElement('div');
 	host.id = containerId;
 	const shadow = host.attachShadow({ mode: 'open' });
 	const mount = document.createElement('div');
-
 	const shadowStyle = document.createElement('style');
 	shadowStyle.textContent = `
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   `;
 	shadow.appendChild(shadowStyle);
 	shadow.appendChild(mount);
@@ -270,12 +276,7 @@ const styles: Record<string, React.CSSProperties> = {
 		fontFamily:
 			'system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji',
 	},
-	header: {
-		padding: '12px 16px',
-		fontSize: 18,
-		fontWeight: 700,
-		borderBottom: '1px solid rgba(255,255,255,0.08)',
-	},
+	header: { padding: '12px 16px', fontSize: 18, fontWeight: 700, borderBottom: '1px solid rgba(255,255,255,0.08)' },
 	body: { padding: 16, fontSize: 14 },
 	footer: { padding: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 },
 	button: {
@@ -288,22 +289,9 @@ const styles: Record<string, React.CSSProperties> = {
 		fontWeight: 600,
 		cursor: 'pointer',
 	},
-	secondaryButton: {
-		background: 'transparent',
-		color: '#e7e9ea',
-		border: '1px solid rgba(255,255,255,0.2)',
-	},
-	loadingContent: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 12,
-		fontSize: 14,
-	},
-	spinner: {
-		width: 20,
-		height: 20,
-		position: 'relative',
-	},
+	secondaryButton: { background: 'transparent', color: '#e7e9ea', border: '1px solid rgba(255,255,255,0.2)' },
+	loadingContent: { display: 'flex', alignItems: 'center', gap: 12, fontSize: 14 },
+	spinner: { width: 20, height: 20, position: 'relative' },
 	spinnerInner: {
 		width: '100%',
 		height: '100%',
@@ -311,5 +299,13 @@ const styles: Record<string, React.CSSProperties> = {
 		borderTop: '2px solid #1d9bf0',
 		borderRadius: '50%',
 		animation: 'spin 1s linear infinite',
+	},
+	errorText: {
+		marginTop: 12,
+		color: '#f97066',
+		fontSize: 13,
+		lineHeight: 1.4,
+		wordBreak: 'break-word',
+		whiteSpace: 'pre-wrap',
 	},
 };
