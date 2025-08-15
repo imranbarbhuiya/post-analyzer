@@ -1,35 +1,41 @@
 {
-	"name": "post-analyzer",
-	"displayName": "Post Analyzer",
+	"name": "x-post-analyzer",
+	"displayName": "X Post Analyzer",
 	"version": "0.0.1",
 	"description": "A chrome extension for x.com that checks your content before allowing you to submit",
 	"author": "Parbez <imranbarbhuiya.fsd@gmail.com>",
 	"scripts": {
 		"dev": "plasmo dev",
 		"build": "plasmo build",
-		"package": "plasmo package"
+		"package": "plasmo package",
+		"lint": "eslint --cache --fix .",
+		"format": "prettier --write --cache --experimental-cli ."
 	},
 	"dependencies": {
-		"@ai-sdk/openai": "^2.0.2",
+		"@ai-sdk/openai": "^2.0.14",
 		"@plasmohq/storage": "^1.15.0",
-		"ai": "^5.0.2",
+		"ai": "^5.0.14",
 		"plasmo": "0.90.5",
-		"react": "18.2.0",
-		"react-dom": "18.2.0",
-		"zod": "^4.0.14"
+		"react": "19.1.1",
+		"react-dom": "19.1.1",
+		"zod": "^4.0.17"
 	},
 	"devDependencies": {
-		"@ianvs/prettier-plugin-sort-imports": "4.1.1",
-		"@types/chrome": "0.0.258",
-		"@types/node": "20.11.5",
-		"@types/react": "18.2.48",
-		"@types/react-dom": "18.2.18",
-		"prettier": "3.2.4",
-		"typescript": "5.3.3"
+		"@ianvs/prettier-plugin-sort-imports": "4.6.2",
+		"@types/chrome": "0.1.4",
+		"@types/node": "24.2.1",
+		"@types/react": "19.1.10",
+		"@types/react-dom": "19.1.7",
+		"eslint-config-mahir": "^1.0.7",
+		"prettier": "3.6.2",
+		"typescript": "5.9.2"
 	},
 	"manifest": {
 		"host_permissions": [
-			"https://*/*"
+			"https://x.com/*",
+			"https://www.x.com/*",
+			"https://twitter.com/*",
+			"https://www.twitter.com/*"
 		]
 	},
 	"packageManager": "pnpm@10.14.0"

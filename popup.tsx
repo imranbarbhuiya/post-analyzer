@@ -10,17 +10,13 @@ function IndexPopup() {
 
 	useEffect(() => {
 		const fetchSettings = async () => {
-			const savedPrompt = (await storage.get('ps.systemPrompt')) || '';
-			const savedKey = (await storage.get('ps.apiKey')) || '';
+			const savedPrompt = (await storage.get('ps.systemPrompt')) ?? '';
+			const savedKey = (await storage.get('ps.apiKey')) ?? '';
 			setSystemPrompt(savedPrompt);
 			setApiKey(savedKey);
 		};
-		fetchSettings();
+		void fetchSettings();
 	}, []);
-
-	useEffect(() => {
-		if (submitted) setSubmitted(false);
-	}, [systemPrompt, apiKey]);
 
 	const onSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
@@ -33,8 +29,8 @@ function IndexPopup() {
 			setError('OpenAI API key is required');
 			return;
 		}
-		storage.set('ps.systemPrompt', systemPrompt);
-		storage.set('ps.apiKey', apiKey);
+		void storage.set('ps.systemPrompt', systemPrompt);
+		void storage.set('ps.apiKey', apiKey);
 		setSubmitted(true);
 	};
 
@@ -78,8 +74,10 @@ function IndexPopup() {
 				>
 					<span style={{ fontWeight: 600 }}>System Prompt</span>
 					<textarea
-						value={systemPrompt}
-						onChange={(e) => setSystemPrompt(e.target.value)}
+						onChange={(e) => {
+							setSystemPrompt(e.target.value);
+							setSubmitted(false);
+						}}
 						placeholder="You are a helpful assistant..."
 						rows={5}
 						style={{
@@ -92,6 +90,7 @@ function IndexPopup() {
 							outline: 'none',
 							boxShadow: '0 1px 0 rgba(0,0,0,0.05)',
 						}}
+						value={systemPrompt}
 					/>
 				</label>
 				<label
@@ -104,9 +103,10 @@ function IndexPopup() {
 				>
 					<span style={{ fontWeight: 600 }}>OpenAI API Key</span>
 					<input
-						type="password"
-						value={apiKey}
-						onChange={(e) => setApiKey(e.target.value)}
+						onChange={(e) => {
+							setApiKey(e.target.value);
+							setSubmitted(false);
+						}}
 						placeholder="sk-..."
 						style={{
 							height: 36,
@@ -118,6 +118,8 @@ function IndexPopup() {
 							outline: 'none',
 							boxShadow: '0 1px 0 rgba(0,0,0,0.05)',
 						}}
+						type="password"
+						value={apiKey}
 					/>
 				</label>
 				{error ? <div style={{ fontSize: 12, color: '#b00000' }}>{error}</div> : null}
@@ -125,7 +127,6 @@ function IndexPopup() {
 					<div style={{ fontSize: 12, color: '#0b6b0b' }}>Settings saved successfully!</div>
 				) : (
 					<button
-						type="submit"
 						style={{
 							height: 36,
 							borderRadius: 999,
@@ -135,6 +136,7 @@ function IndexPopup() {
 							fontWeight: 600,
 							cursor: 'pointer',
 						}}
+						type="submit"
 					>
 						Save
 					</button>
